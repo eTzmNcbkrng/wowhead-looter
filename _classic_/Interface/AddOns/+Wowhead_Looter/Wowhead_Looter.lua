@@ -38,7 +38,7 @@ wlTime = GetServerTime();
 wlVersion, wlUploaded, wlStats, wlExportData, wlRealmList = 0, 0, "", "", {};
 wlAuction, wlEvent, wlItemSuffix, wlObject, wlProfile, wlUnit = {}, {}, {}, {}, {}, {};
 wlItemDurability, wlItemBonuses = {}, {};
-wlBaseStats2, wlProfileData = {}, {};
+wlBaseStats2, wlProfileData, wlTradeSkillDifficulty = {}, {}, {};
 
 -- SavedVariablesPerCharacter
 wlSetting = {};
@@ -630,6 +630,7 @@ function wlEvent_PLAYER_LOGIN(self)
     end
     
     wlUpdateMiniMapButtonPosition(_G["wlMinimapButton"]);
+    if wlSetting.minimap then
     if wlSetting.minimap then
         wlMinimapButton:Hide();
         _G["wlminimapCheckbox"]:SetChecked(false);
@@ -2927,9 +2928,31 @@ end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
 
-function wlEvent_TRADE_SKILL_DATA_SOURCE_CHANGED(self, ...)
-    -- it's okay to run this now even if we can't guarantee all the spells are available at this time
-    wlScanProfessionWindow(wlGrabTradeSkillTools);
+local scanningProfessionWindow;
+function wlEvent_TRADE_SKILL_UPDATE(self, ...)
+    -- When we scan the profession window, we'll fire more TRADE_SKILL_UPDATE events which we want to ignore.
+    if scanningProfessionWindow then
+        return;
+    end
+    scanningProfessionWindow = true;
+
+    wlScanTradeSkillWindow(wlGrabTradeSkillDifficulty);
+
+    scanningProfessionWindow = nil;
+end
+
+--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
+
+function wlEvent_CRAFT_UPDATE(self, ...)
+    -- When we scan the profession window, we'll fire more CRAFT_UPDATE events which we want to ignore.
+    if scanningProfessionWindow then
+        return;
+    end
+    scanningProfessionWindow = true;
+
+    wlScanCraftWindow(wlGrabTradeSkillDifficulty);
+
+    scanningProfessionWindow = nil;
 end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
@@ -2940,59 +2963,191 @@ end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
 
--- a trade skill spell handler
-function wlGrabTradeSkillTools(skillLineName, spellId, tradeSkillIndex)
-    -- Process Anvil and Forge detection
-    local tools = C_TradeSkillUI.GetRecipeTools(tradeSkillIndex);
+--- A callback for wlScanTradeSkillWindow. Records each skill's difficulty relative to current skill level.
+-- @param uiType One of "tradeskill" or "craft" depending on which UI is shown
+-- @param index The index for the currently examined ability
+-- @param link An itemlink for what the current ability produces
+function wlGrabTradeSkillDifficulty(uiType, index, link)
+    local _, lineName, currentLevel, difficultyTerm, id;
+    local isSpell;
 
-    if tools then
-        if tools:find("Anvil") ~= nil then
-            wlAnvilSpells[tonumber(spellId)] = true;
+    -- Handle all tradeskills except Enchanting
+    if uiType == "tradeskill" then
+        lineName, currentLevel = GetTradeSkillLine();
+        _, difficultyTerm = GetTradeSkillInfo(index);
+        id = wlParseItemLink(link);
+    end
+
+    -- Handle Enchanting (which we want), and skip Beast Training (which we don't want).
+    if uiType == "craft" then
+        lineName, currentLevel = GetCraftDisplaySkillLine();
+        if lineName then
+            _, _, difficultyTerm = GetCraftInfo(index);
+            local found, _, spellId = link:find("^|%x+|Henchant:(.+)|h%[.+%]");
+            if found then
+                id = spellId;
+                isSpell = true;
+            else
+                id = wlParseItemLink(link);
+            end
         end
-        if tools:find("Forge") ~= nil then
-            wlForgeSpells[tonumber(spellId)] = true;
+    end
+
+    if id then
+        if isSpell then
+            id = 's' .. id;
+        else
+            id = 'i' .. id;
+        end
+
+        local tsd = wlTradeSkillDifficulty;
+
+        tsd[lineName] = tsd[lineName] or {};
+        tsd[lineName][id] = tsd[lineName][id] or {};
+        tsd[lineName][id][difficultyTerm] = tsd[lineName][id][difficultyTerm] or {};
+        local rec = tsd[lineName][id][difficultyTerm];
+
+        if rec[1] then
+            rec[1] = min(rec[1], currentLevel);
+        else
+            rec[1] = currentLevel;
+        end
+        if rec[2] then
+            rec[2] = max(rec[2], currentLevel);
+        else
+            rec[2] = currentLevel;
         end
     end
 end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
 
--- roll through the trade skill window, doing something interesting with each spell found
-function wlScanProfessionWindow(...)
+--- Executes callback functions for each learned trade skill ability in the currently open tradeskill window.
+-- @param ... Functions to call with the parameters: ("tradeskill", index, itemLink)
+function wlScanTradeSkillWindow(...)
     -- do some sanity checking
-    local parameterCount = select('#', ...)
-    if parameterCount <= 0 then 
+    local parameterCount = select('#', ...);
+    if parameterCount <= 0 then
         return;
     end
     for funcIndex = 1, parameterCount do
-        if "function" ~= type(select(funcIndex, ...)) then 
+        if "function" ~= type(select(funcIndex, ...)) then
             return;
         end
     end
 
-    local tradeSkillID, skillLineName =  C_TradeSkillUI.GetTradeSkillLine();
+    local selectedSlot;
+    if not GetTradeSkillInvSlotFilter(0) then
+        -- Something other than "All Slots" is checked. Scan the options to find and remember which was checked.
+        local optCount = select("#", GetTradeSkillInvSlots());
+        for i=1, optCount, 1 do
+            if GetTradeSkillInvSlotFilter(i) then
+                selectedSlot = i;
+            end
+        end
+        -- Check "All slots" at the top of the list.
+        SetTradeSkillInvSlotFilter(0, 1, 1);
+    end
 
-    local showMakeable = C_TradeSkillUI.GetOnlyShowMakeableRecipes();
-    local showSkillups = C_TradeSkillUI.GetOnlyShowSkillUpRecipes();
-    C_TradeSkillUI.SetOnlyShowMakeableRecipes(false);
-    C_TradeSkillUI.SetOnlyShowSkillUpRecipes(false);
+    local selectedSubClass;
+    if not GetTradeSkillSubClassFilter(0) then
+        -- Something other than "All Subclasses" is checked. Scan the options to find and remember which was checked.
+        local optCount = select("#", GetTradeSkillSubClasses());
+        for i=1, optCount, 1 do
+            if GetTradeSkillSubClassFilter(i) then
+                selectedSubClass = i;
+            end
+        end
+        -- Check "All subclasses" at the top of the list.
+        SetTradeSkillSubClassFilter(0, 1, 1);
+    end
 
-    local recipes = C_TradeSkillUI.GetFilteredRecipeIDs();
-    for i, recipeID in ipairs(recipes) do
-        local recipeLink = C_TradeSkillUI.GetRecipeLink(recipeID);
-        if recipeLink ~= nil then
-            local found, _, spellId = recipeLink:find("^|%x+|Henchant:(.+)|h%[.+%]");
-            if found then
-                -- run the handlers for this trade skill spell
+    -- Remember which tradeskill headers were collapsed
+    local collapsedIndexes = {}
+    local numRecipes = GetNumTradeSkills();
+    for i=1, numRecipes, 1 do
+        local skillName, skillType, _, isExpanded = GetTradeSkillInfo(i);
+        if skillType == "header" and not isExpanded then
+            tinsert(collapsedIndexes, i);
+        end
+    end
+    -- Expand all trade skill headers
+    ExpandTradeSkillSubClass(0);
+
+    -- Scan through all recipes, calling each callback for each recipe.
+    local numRecipes = GetNumTradeSkills();
+    for i=1, numRecipes, 1 do
+        local skillName, skillType = GetTradeSkillInfo(i);
+        if skillType ~= "header" then
+            local recipeLink = GetTradeSkillItemLink(i);
+            if recipeLink ~= nil then
                 for funcIndex = 1, parameterCount do
-                    select(funcIndex, ...)(skillLineName, spellId, recipeID);
+                    select(funcIndex, ...)('tradeskill', i, recipeLink);
                 end
             end
         end
     end
 
-    C_TradeSkillUI.SetOnlyShowMakeableRecipes(showMakeable);
-    C_TradeSkillUI.SetOnlyShowSkillUpRecipes(showSkillups);
+    -- Restore user preferences.
+    local collapseCount = #collapsedIndexes;
+    for i=1, collapseCount, 1 do
+        CollapseTradeSkillSubClass(collapsedIndexes[i]);
+    end
+    if selectedSubClass then
+        SetTradeSkillSubClassFilter(selectedSubClass, 1, 1);
+    end
+    if selectedSlot then
+        SetTradeSkillInvSlotFilter(selectedSlot, 1, 1);
+    end
+end
+
+--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
+
+--- Executes callback functions for each learned craft ability in the currently open craft window.
+-- @param ... Functions to call with the parameters: ("craft", index, itemLink)
+function wlScanCraftWindow(...)
+    -- do some sanity checking
+    local parameterCount = select('#', ...);
+    if parameterCount <= 0 then
+        return;
+    end
+    for funcIndex = 1, parameterCount do
+        if "function" ~= type(select(funcIndex, ...)) then
+            return;
+        end
+    end
+
+    -- Remember which craft headers were collapsed
+    local collapsedIndexes = {}
+    local numRecipes = GetNumCrafts();
+    for i=1, numRecipes, 1 do
+        local skillName, _, skillType, _, isExpanded = GetCraftInfo(i);
+        if skillType == "header" and not isExpanded then
+            tinsert(collapsedIndexes, i);
+        end
+    end
+    -- Expand all craft headers
+    ExpandCraftSkillLine(0);
+
+    -- Scan through all recipes, calling each callback for each recipe.
+    local numRecipes = GetNumCrafts();
+    for i=1, numRecipes, 1 do
+        local skillName, _, skillType = GetCraftInfo(i);
+        if skillType ~= "header" then
+            local recipeLink = GetCraftItemLink(i);
+            if recipeLink ~= nil then
+                for funcIndex = 1, parameterCount do
+                    select(funcIndex, ...)('craft', i, recipeLink);
+                end
+            end
+        end
+    end
+
+    -- Restore user preferences.
+    local collapseCount = #collapsedIndexes;
+    for i=1, collapseCount, 1 do
+        CollapseCraftSkillLine(collapsedIndexes[i]);
+    end
 end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
@@ -3216,7 +3371,8 @@ local wlEvents = {
     ZONE_CHANGED_NEW_AREA = wlEvent_ZONE_CHANGED,
 
     -- completist
-    TRADE_SKILL_DATA_SOURCE_CHANGED = wlEvent_TRADE_SKILL_DATA_SOURCE_CHANGED,
+    TRADE_SKILL_UPDATE = wlEvent_TRADE_SKILL_UPDATE,
+    CRAFT_UPDATE = wlEvent_CRAFT_UPDATE,
     CURRENCY_DISPLAY_UPDATE = wlEvent_CURRENCY_DISPLAY_UPDATE,
     KNOWN_TITLES_UPDATE = wlEvent_TITLES_UPDATED,
 };
@@ -4606,7 +4762,7 @@ function wlReset()
     wlVersion, wlUploaded, wlStats, wlExportData, wlRealmList = WL_VERSION, 0, "", "", {};
     wlAuction, wlEvent, wlItemSuffix, wlObject, wlProfile, wlUnit = {}, {}, {}, {}, {}, {};
     wlItemDurability, wlItemBonuses = {}, {};
-    wlBaseStats2, wlProfileData = {}, {};
+    wlBaseStats2, wlProfileData, wlTradeSkillDifficulty = {}, {}, {};
 end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
