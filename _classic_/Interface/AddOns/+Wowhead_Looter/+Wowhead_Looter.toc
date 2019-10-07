@@ -1,0 +1,13 @@
+## Interface: 11302
+## Title: Wowhead Looter
+## Notes: Gathers data for Wowhead while you play. Version 11302.
+## Author: mystadio
+## eMail: feedback@wowhead.com
+## URL: https://www.wowhead.com/
+## Version: 11302
+## LoadOnDemand: 0
+## DefaultState: enabled
+## SavedVariables: wlTime, wlVersion, wlUploaded, wlStats, wlExportData, wlRealmList, wlAuction, wlEvent, wlItemSuffix, wlObject, wlProfile, wlProfileData, wlUnit, wlBaseStats2, wlItemDurability, wlItemBonuses
+## SavedVariablesPerCharacter: wlScans, wlSetting, wlPetBlacklist, wlUIReloaded
+
+Wowhead_Looter.xml
