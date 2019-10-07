@@ -631,11 +631,11 @@ function wlEvent_PLAYER_LOGIN(self)
     
     wlUpdateMiniMapButtonPosition(_G["wlMinimapButton"]);
     if wlSetting.minimap then
-        wlMinimapButton:Show();
-        _G["wlminimapCheckbox"]:SetChecked(true);
+        wlMinimapButton:Hide();
+        _G["wlminimapCheckbox"]:SetChecked(false);
     elseif wlSetting.minimap == nil then
-        wlMinimapButton:Show();
-        _G["wlminimapCheckbox"]:SetChecked(true);
+        wlMinimapButton:Hide();
+        _G["wlminimapCheckbox"]:SetChecked(false);
     else
         _G["wlminimapCheckbox"]:SetChecked(false);
     end
@@ -2734,11 +2734,11 @@ end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
 
-local wlTimePlayed_SkipNext = false;
+local wlTimePlayed_SkipNext = true;
 function wlChatFrame_DisplayTimePlayed(self, totalTime, ...)
     if wlTimePlayed_SkipNext then
         wlScans.timePlayedTotal = totalTime;
-        wlTimePlayed_SkipNext = false;
+        wlTimePlayed_SkipNext = true;
     else
         wlDefaultChatFrame_DisplayTimePlayed(self, totalTime, ...);
     end
@@ -3562,7 +3562,7 @@ function wlCreateFrames()
     minimapCheckbox:SetScript("OnClick", function(self, button, down) 
         wlSetting.minimap = minimapCheckbox:GetChecked() and true or false;
         if wlSetting.minimap then
-            wlMinimapButton:Show();
+            wlMinimapButton:Hide();
         else
             wlMinimapButton:Hide();
         end
