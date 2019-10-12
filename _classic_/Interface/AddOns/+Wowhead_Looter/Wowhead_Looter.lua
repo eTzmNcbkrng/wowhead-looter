@@ -2927,31 +2927,27 @@ end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
 
-local scanningProfessionWindow;
+local lastProfessionScan = 0;
 function wlEvent_TRADE_SKILL_UPDATE(self, ...)
     -- When we scan the profession window, we'll fire more TRADE_SKILL_UPDATE events which we want to ignore.
-    if scanningProfessionWindow then
+    if time() - lastProfessionScan <= 0 then
         return;
     end
-    scanningProfessionWindow = true;
+    lastProfessionScan = time();
 
     wlScanTradeSkillWindow(wlGrabTradeSkillDifficulty);
-
-    scanningProfessionWindow = nil;
 end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
 
 function wlEvent_CRAFT_UPDATE(self, ...)
     -- When we scan the profession window, we'll fire more CRAFT_UPDATE events which we want to ignore.
-    if scanningProfessionWindow then
+    if time() - lastProfessionScan <= 0 then
         return;
     end
-    scanningProfessionWindow = true;
+    lastProfessionScan = time();
 
     wlScanCraftWindow(wlGrabTradeSkillDifficulty);
-
-    scanningProfessionWindow = nil;
 end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
