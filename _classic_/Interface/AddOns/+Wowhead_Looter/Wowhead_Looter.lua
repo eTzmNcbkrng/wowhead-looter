@@ -631,7 +631,6 @@ function wlEvent_PLAYER_LOGIN(self)
     
     wlUpdateMiniMapButtonPosition(_G["wlMinimapButton"]);
     if wlSetting.minimap then
-    if wlSetting.minimap then
         wlMinimapButton:Hide();
         _G["wlminimapCheckbox"]:SetChecked(false);
     elseif wlSetting.minimap == nil then
