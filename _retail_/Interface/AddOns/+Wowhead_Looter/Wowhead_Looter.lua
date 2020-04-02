@@ -3,15 +3,15 @@
 --     W o w h e a d   L o o t e r     --
 --                                     --
 --                                     --
---    Patch: 8.2.5                     --
---    Updated: September 24, 2019      --
+--    Patch: 8.3.0                     --
+--    Updated: March 31, 2020          --
 --    E-mail: feedback@wowhead.com     --
 --                                     --
 -----------------------------------------
 
 
 local WL_NAME = "|cffffff7fWowhead Looter|r";
-local WL_VERSION = 80205;
+local WL_VERSION = 80300;
 local WL_VERSION_PATCH = 0;
 local WL_ADDONNAME, WL_ADDONTABLE = ...
 
@@ -194,6 +194,41 @@ local WL_LOOT_TOAST_NOSPELL =
     [170061] = true, -- Rustbolt Supplies
     [169939] = true, -- Ankoan Supplies
     [169940] = true, -- Unshackled Supplies
+
+    -- 8.3
+    [173372] = true, -- Cache of the Black Empire
+    [173734] = true, -- Mysterious Crate
+    [173949] = true, -- Dread Chain Salvage
+    [173950] = true, -- Crestfall Salvage
+    [173983] = true, -- Vulpera Satchel of Salvage
+    [173987] = true, -- Elemental Salvage
+    [173988] = true, -- Havenswood Salvage
+    [173989] = true, -- Jorundall Salvage
+    [173990] = true, -- Molten Cay Salvage
+    [173991] = true, -- Rotting Mire Salvage
+    [173992] = true, -- Skittering Hollow Salvage
+    [173993] = true, -- Snowblossom Salvage
+    [173994] = true, -- Un'gol Ruins Salvage
+    [173995] = true, -- Venture Co. 'Salvage'
+    [173996] = true, -- Verdant Wilds Salvage
+    [173997] = true, -- Whispering Reef Salvage
+    [174039] = true, -- Crate of Cursed Mementos
+    [174181] = true, -- Bag of Herbs
+    [174182] = true, -- Bag of Ore
+    [174183] = true, -- Bag of Leather
+    [174184] = true, -- Bag of Cloth
+    [174194] = true, -- Bag of Enchanting
+    [174195] = true, -- Bag of Gems
+    [174358] = true, -- Unopened Blackrock Supply Crate
+    [174483] = true, -- Rajani Supplies
+    [174484] = true, -- Uldum Accord Supplies
+    [174529] = true, -- Crate of Coalescing Visions
+    [174642] = true, -- Corrupted Ny'alotha Raid Item
+    [174958] = true, -- Cache of the Fallen Mogu
+    [174959] = true, -- Cache of the Mantid Swarm
+    [174960] = true, -- Cache of the Aqir Swarm
+    [174961] = true, -- Cache of the Amathet
+
 };
 
 local WL_REP_MODS = {
@@ -1318,9 +1353,10 @@ function wlEvent_TRAINER_SHOW(self)
         local spellName, spellSubText, _, _, reqLevel = GetTrainerServiceInfo(i);
 
         if spellName then
+            wlGameTooltip:SetOwner(UIParent, 'ANCHOR_NONE');
             wlGameTooltip:ClearLines();
             wlGameTooltip:SetTrainerService(i);
-            spellId = select(3, wlGameTooltip:GetSpell());
+            spellId = select(2, wlGameTooltip:GetSpell());
 
             if isTradeSkill then
                 skill, skillRank = GetTrainerServiceSkillReq(i);
@@ -1524,13 +1560,10 @@ end
 ----------------------------
 
 function wlUpdateFaction()
-    for i=1, 500 do
-        local name, _, standing, _, _, _, _, _, header = GetFactionInfo(i);
-        if not name then
-            break;
-        end
+    for i=1, GetNumFactions() do
+        local name, _, standing, _, _, _, _, _, header, _, _, _, _, factionId = GetFactionInfo(i);
         if name and not header then
-            wlFaction[name] = standing;
+            wlFaction[name] = { standing = standing, id = factionId };
         end
     end
 end
@@ -1545,7 +1578,7 @@ function wlUnitFaction(unit)
     for line=2, wlGameTooltip:NumLines() do
         local faction = _G["wlGameTooltipTextLeft"..line]:GetText();
         if wlFaction[faction] then
-            return faction, wlFaction[faction];
+            return faction, wlFaction[faction].standing;
         end
     end
 
@@ -1955,6 +1988,9 @@ end
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
 
 function wlEvent_QUEST_COMPLETE(self)
+    if not wlTracker.quest then
+        return;
+    end
     if wlTracker.quest.action ~= "progress" or wlTracker.quest.id ~= GetQuestID() then
         wlClearTracker("quest"); -- Not the same quest
 
@@ -2011,6 +2047,10 @@ end
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
 
 function wlRegisterQuestReturn()
+    if not wlTracker.quest then
+        return;
+    end
+
     if wlTracker.quest.action ~= "complete" then
         return;
     end
@@ -2101,37 +2141,53 @@ end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
 
-function wlEvent_COMBAT_TEXT_UPDATE(self, messageType, param1, param2)
-    if messageType == "FACTION" then
+-- Localized string for matching reputation increase chat combat message
+local WL_REP_INC = string.gsub(string.gsub(FACTION_STANDING_INCREASED, "(%%s)", "(.+)"), "(%%d)", "(%%d+)");
+
+-- Localized string for matching reputation decrease chat combat message
+local WL_REP_DEC = string.gsub(string.gsub(FACTION_STANDING_DECREASED, "(%%s)", "(.+)"), "(%%d)", "(%%d+)");
+
+-- Event callback for CHAT_MSG_COMBAT_FACTION_CHANGE for gathering reputation changes
+function wlEvent_CHAT_MSG_COMBAT_FACTION_CHANGE(self, msg)
+    local _, _, factionName, amount = string.find(msg, WL_REP_INC);
+    if (not factionName or not amount) then
+        _, _, factionName, amount = string.find(msg, WL_REP_DEC);
+        if (amount) then
+            amount = -amount;
+        end
+    end
+
+    if (not factionName or not amount) then
+        return;
+    end
+
+    if (not wlFaction[factionName]) then
         wlUpdateFaction();
-        if wlIsValidInterval(wlTracker.quest.time or 0, wlGetTime(), 1000) and wlTracker.quest.action == "turn-in" then
-            return; -- Quest reputation
-        elseif not wlIsValidInterval(wlTracker.rep.time or 0, wlGetTime(), 1000) or not wlFaction[param1] then
-            return; -- Not kill reputation
-        end
-        
-        if param2 == 0 then -- for safety
-            return;
-        end
-        
-        local repMod = 1;
-        if IsSpellKnown(20599) then -- Diplomacy
-            repMod = repMod + 0.1;
-        end
-        if IsSpellKnown(170200) then -- Trading Pact
-            repMod = repMod + 0.2;
-        end
-        for buffName, factMod in pairs(WL_REP_MODS) do
-            if AuraUtil.FindAuraByName(buffName, "player") then
-                if param1 == factMod[1] or factMod == nil then
-                    repMod = repMod + factMod[2];
-                end
+    end
+
+    if wlIsValidInterval(wlTracker.quest.time or 0, wlGetTime(), 1000) and wlTracker.quest.action == "turn-in" then
+        return; -- Quest reputation
+    elseif not wlIsValidInterval(wlTracker.rep.time or 0, wlGetTime(), 1000) or not wlFaction[factionName] then
+        return; -- Not kill reputation
+    end
+
+    local repMod = 1;
+    if IsSpellKnown(20599) then -- Diplomacy
+        repMod = repMod + 0.1;
+    end
+    if IsSpellKnown(170200) then -- Trading Pact
+        repMod = repMod + 0.2;
+    end
+    for buffName, factMod in pairs(WL_REP_MODS) do
+        if AuraUtil.FindAuraByName(buffName, "player") then
+            if factionName == factMod[1] or factMod == nil then
+                repMod = repMod + factMod[2];
             end
         end
-        
-        param2 = floor((param2/repMod) + 0.5);
-        wlUpdateVariable(wlUnit, wlTracker.rep.id, "spec", wlGetInstanceDifficulty(), "rep", wlConcat(param1, wlFaction[param1], param2, wlTracker.rep.flags), "add", 1);
     end
+
+    amount = floor((amount/repMod) + 0.5);
+    wlUpdateVariable(wlUnit, wlTracker.rep.id, "spec", wlGetInstanceDifficulty(), "rep", wlConcat(factionName, wlFaction[factionName].standing, amount, wlTracker.rep.flags, wlFaction[factionName].id), "add", 1);
 end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
@@ -2684,8 +2740,9 @@ function wlEvent_SHOW_LOOT_TOAST(self, typeIdentifier, itemLink, quantity, specI
         
         local typeId = nil;
         local currencyId = nil;
+        local numBonus = 0;
         if typeIdentifier == "item" then
-            typeId = wlParseItemLink(itemLink);
+            typeId, _, _, _, _, _, _, _, _, _, _, numBonus = wlParseItemLink(itemLink);
         elseif typeIdentifier == "money" then
             typeId = "coin";
         elseif typeIdentifier == "currency" then
@@ -2698,7 +2755,7 @@ function wlEvent_SHOW_LOOT_TOAST(self, typeIdentifier, itemLink, quantity, specI
         if typeId == "currency" then
             wlUpdateVariable(wlEvent, wlId, wlN, eventId, "drop", #wlEvent[wlId][wlN][eventId]["drop"] + 1, "set", wlConcat(typeId, quantity, currencyId));
         else
-            wlUpdateVariable(wlEvent, wlId, wlN, eventId, "drop", #wlEvent[wlId][wlN][eventId]["drop"] + 1, "set", wlConcat(typeId, quantity));
+            wlUpdateVariable(wlEvent, wlId, wlN, eventId, "drop", #wlEvent[wlId][wlN][eventId]["drop"] + 1, "set", wlConcat(typeId, quantity, 0, numBonus > 0 and itemLink or nil));
         end
         
     end
@@ -2793,6 +2850,11 @@ end
 
 function wlEvent_LOOT_CLOSED(self)
     wlClearTracker("spell");
+end
+
+
+function wlEvent_BAG_UPDATE_DELAYED()
+    wlCurrentLootToastEventId = nil;
 end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
@@ -2908,7 +2970,9 @@ function wlEvent_LOOT_OPENED(self)
             -- SendAddonMessage does not allow to send nil or "" as msg.
             -- Only send it if we got a valid 'guid'. This should not affect any data.
             if guid then
-                SendAddonMessage("WL_LOOT_COOLDOWN", guid, IsPartyLFG() and "INSTANCE_CHAT" or "RAID");
+                SendAddonMessage("WL_LOOT_COOLDOWN", guid,
+                        (wlIsInBattleground() and "BATTLEGROUND") or
+                        IsPartyLFG() and "INSTANCE_CHAT" or "RAID");
             end
         else
             wlEvent_CHAT_MSG_ADDON(self, "WL_LOOT_COOLDOWN", guid, "RAID", UnitName("player"));
@@ -2948,10 +3012,12 @@ function wlEvent_LOOT_OPENED(self)
         local slotType = GetLootSlotType(slot);
         if slotType ~= LOOT_SLOT_NONE then
             local typeId = nil;
+            local numBonus = 0;
             local currencyId = nil;
+            local itemLink = GetLootSlotLink(slot);
             
             if slotType == LOOT_SLOT_ITEM then 
-                typeId = wlParseItemLink(GetLootSlotLink(slot));
+                typeId, _, _, _, _, _, _, _, _, _, _, numBonus = wlParseItemLink(itemLink);
                 -- for sourceIndex = 1, #lootSources, 2 do
                 --     print(("%s looted %d of %s"):format(wlParseGUID(lootSources[sourceIndex]), lootSources[sourceIndex + 1], GetItemInfo(itemId)));
                 -- end
@@ -2980,6 +3046,7 @@ function wlEvent_LOOT_OPENED(self)
                         targetLoots[typeId][1] = (targetLoots[typeId][1] or 0) + qty;
                         targetLoots[typeId][2] = (targetLoots[typeId][2] or 0) + wlSelectOne(3, GetLootSlotInfo(slot));
                         targetLoots[typeId][3] = (currencyId or 0);
+                        targetLoots[typeId][4] = numBonus > 0 and itemLink or nil;
                         if wlTracker.spell.kind == "object" then
                             local guidId, guidKind = wlParseGUID(aoeGUID);
                             if (guidKind == "object") then
@@ -2995,6 +3062,7 @@ function wlEvent_LOOT_OPENED(self)
                         end
                         aoeNpcs[aoeGUID][typeId][1] = (aoeNpcs[aoeGUID][typeId][1] or 0) + qty;
                         aoeNpcs[aoeGUID][typeId][2] = (currencyId or 0);
+                        aoeNpcs[aoeGUID][typeId][3] = numBonus > 0 and itemLink or nil;
                     end
                 end
             end
@@ -3015,7 +3083,7 @@ function wlEvent_LOOT_OPENED(self)
         if currencyId > 0 then
             wlUpdateVariable(wlEvent, wlId, wlN, eventId, "drop", i, "set", wlConcat("currency", qty, currencyId));
         else 
-            wlUpdateVariable(wlEvent, wlId, wlN, eventId, "drop", i, "set", wlConcat(typeId, qty));
+            wlUpdateVariable(wlEvent, wlId, wlN, eventId, "drop", i, "set", wlConcat(typeId, qty, 0, qtyInfo[4]));
         end
         i = i + 1;
     end
@@ -3031,7 +3099,9 @@ function wlEvent_LOOT_OPENED(self)
                 do break end;
             end
             if wlIsInParty() then
-                SendAddonMessage("WL_LOOT_COOLDOWN", guidMsg, IsPartyLFG() and "INSTANCE_CHAT" or "RAID");
+                SendAddonMessage("WL_LOOT_COOLDOWN", guidMsg,
+                        (wlIsInBattleground() and "BATTLEGROUND") or
+                        IsPartyLFG() and "INSTANCE_CHAT" or "RAID");
             else
                 wlEvent_CHAT_MSG_ADDON(self, "WL_LOOT_COOLDOWN", guidMsg, "RAID", UnitName("player"));
             end
@@ -3054,7 +3124,7 @@ function wlEvent_LOOT_OPENED(self)
                 if qty[2] > 0 then -- Currency 
                     wlUpdateVariable(wlEvent, wlId, wlN, aoeEventId, "drop", aoeCounter, "set", wlConcat("currency", qty[1], qty[2]));
                 else -- Money or Item
-                    wlUpdateVariable(wlEvent, wlId, wlN, aoeEventId, "drop", aoeCounter, "set", wlConcat(typeId, qty[1]));
+                    wlUpdateVariable(wlEvent, wlId, wlN, aoeEventId, "drop", aoeCounter, "set", wlConcat(typeId, qty[1], 0, qty[3]));
                 end
                 aoeCounter = aoeCounter + 1;
             end
@@ -3139,7 +3209,7 @@ function wlEvent_CHAT_MSG_LOOT(self, msg, arg2, arg3, arg4, msgLootName)
     if not found then
         qty, found, _, link = 1, msg:find(LOOT_ITEM_PUSHED_SELF);
     end
-    local itemID = wlParseItemLink(link);
+    local itemID, _, _, _, _, _, _, _, _, _, _, numBonus = wlParseItemLink(link);
     qty = tonumber(qty);
 
     if valid and found and itemID and itemID > 0 and qty and qty > 0 then
@@ -3161,7 +3231,7 @@ function wlEvent_CHAT_MSG_LOOT(self, msg, arg2, arg3, arg4, msgLootName)
             wlEvent[wlId][wlN][eventId].flags = 0;
         end
         wlEvent[wlId][wlN][eventId]["drop"] = wlEvent[wlId][wlN][eventId]["drop"] or {};
-        wlUpdateVariable(wlEvent, wlId, wlN, eventId, "drop", #wlEvent[wlId][wlN][eventId]["drop"] + 1, "set", wlConcat(itemID, qty));
+        wlUpdateVariable(wlEvent, wlId, wlN, eventId, "drop", #wlEvent[wlId][wlN][eventId]["drop"] + 1, "set", wlConcat(itemID, qty, 0, numBonus > 0 and link or nil));
     else
         wlClearTracker("spell");
         wlTrackerClearedTime = now;
@@ -3181,6 +3251,10 @@ end
 
 function wlIsInParty()
     return GetNumSubgroupMembers() > 0 or GetNumGroupMembers() > 1;
+end
+
+function wlIsInBattleground()
+    return UnitInBattleground("player") ~= nil;
 end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
@@ -3459,7 +3533,7 @@ function wlScanArtifacts()
     for raceIndex=1, GetNumArchaeologyRaces() do
         if scanTable[raceIndex] then
             for artifactIndex=1, GetNumArtifactsByRace(raceIndex) do
-                local name, _, _, _, _, _, _, _, completionCount = GetArtifactInfoByRace(raceIndex, artifactIndex);
+                local name, _, _, _, _, _, _, _, _, completionCount = GetArtifactInfoByRace(raceIndex, artifactIndex);
                 if name and scanTable[raceIndex][name] and completionCount > 0 then
                     table.insert(temp, scanTable[raceIndex][name] .. ":" .. completionCount);
                 end
@@ -4152,6 +4226,7 @@ local wlEvents = {
     UNIT_SPELLCAST_INTERRUPTED = wlEvent_UNIT_SPELLCAST_FAILED,
     UNIT_SPELLCAST_FAILED_QUIET = wlEvent_UNIT_SPELLCAST_FAILED,
     ITEM_LOCK_CHANGED = wlEvent_ITEM_LOCK_CHANGED,
+    BAG_UPDATE_DELAYED = wlEvent_BAG_UPDATE_DELAYED,
 
     -- chat loot blocking
     GARRISON_MISSION_NPC_CLOSED = wlEvent_UnBlockChatLoot,
@@ -4183,7 +4258,7 @@ local wlEvents = {
     QUEST_LOG_UPDATE = wlEvent_QUEST_LOG_UPDATE,
     QUEST_LOOT_RECEIVED = wlEvent_QUEST_LOOT_RECEIVED,
     UNIT_QUEST_LOG_CHANGED = wlEvent_UNIT_QUEST_LOG_CHANGED,
-    COMBAT_TEXT_UPDATE = wlEvent_COMBAT_TEXT_UPDATE,
+    CHAT_MSG_COMBAT_FACTION_CHANGE = wlEvent_CHAT_MSG_COMBAT_FACTION_CHANGE,
 
     -- garrison
     GARRISON_MISSION_LIST_UPDATE = wlEvent_GARRISON_MISSION_LIST_UPDATE,
@@ -4927,12 +5002,21 @@ end
 -- |cffffff00|Hquest:11506:-1|h[Spirits of Auchindoun]|h|r
 -- (color) : (id) : (name)
 local WL_CURRENCYLINK = "|c(%x+)|Hcurrency:(%d+)|h%[(.+)%]|h|r";
+local WL_CURRENCYLINK2 = "|c(%x+)|Hcurrency:(%d+):%d+|h%[(.+)%]|h|r";
 function wlParseCurrencyLink(link)
     if link then
        for color, id, name in link:gmatch(WL_CURRENCYLINK) do
-            return tonumber(id);
-        end
+            if id then
+                return tonumber(id);
+            end
+       end
+       for color, id, name in link:gmatch(WL_CURRENCYLINK2) do
+            if id then
+                return tonumber(id);
+            end
+       end
     end
+    return nil;
 end
 
 --    (color) : (id) : (enchant) : (1st socket) : (2nd socket) : (3rd socket) : (4th socket) : (subid) : (guid) : (playerLevel) : (specId) : (upgradeType) : (bonusContext) : (numBonus) (: ...bonusIds...) : (upgradeId) : (name)
@@ -4973,11 +5057,11 @@ function wlParseItemLink(link)
                 end
             end
 
-            return id, subId, tonumber(enchant) or 0, tonumber(socket1) or 0, tonumber(socket2) or 0, tonumber(socket3) or 0, tonumber(socket4) or 0, name, color, guid, tonumber(pLevel) or 0;
+            return id, subId, tonumber(enchant) or 0, tonumber(socket1) or 0, tonumber(socket2) or 0, tonumber(socket3) or 0, tonumber(socket4) or 0, name, color, guid, tonumber(pLevel) or 0, numBonus;
         end
     end
 
-    return 0, 0, 0, 0, 0, 0, 0, "", "", 0, 0;
+    return 0, 0, 0, 0, 0, 0, 0, "", "", 0, 0, 0;
 end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
@@ -5574,7 +5658,9 @@ function wlHook()
         end
     end);
     
-    hooksecurefunc("PlaceAuctionBid", wlPlaceAuctionBid);
+    if (PlaceAuctionBid) then
+        hooksecurefunc("PlaceAuctionBid", wlPlaceAuctionBid);
+    end
 end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
