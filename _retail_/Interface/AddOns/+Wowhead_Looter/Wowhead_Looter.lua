@@ -794,7 +794,7 @@ function wlEvent_PLAYER_LOGIN(self)
     wlScanFollowers();
     wlScanHeirlooms();
 
-    wlMessage(WL_LOADED:format(WL_NAME, WL_VERSION), true);
+    --wlMessage(WL_LOADED:format(WL_NAME, WL_VERSION), true);
 end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
@@ -3366,11 +3366,11 @@ end
 
 --**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--**--
 
-local wlTimePlayed_SkipNext = true;
+local wlTimePlayed_SkipNext = false;
 function wlChatFrame_DisplayTimePlayed(self, totalTime, ...)
     if wlTimePlayed_SkipNext then
         wlScans.timePlayedTotal = totalTime;
-        wlTimePlayed_SkipNext = true;
+        wlTimePlayed_SkipNext = false;
     else
         wlDefaultChatFrame_DisplayTimePlayed(self, totalTime, ...);
     end
