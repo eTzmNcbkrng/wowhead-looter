@@ -2742,6 +2742,7 @@ function wlCollect(userInitiated)
         return;
     end
 
+    DEFAULT_CHAT_FRAME:UnregisterEvent("TIME_PLAYED_MSG");
     wlQueryTimePlayed();
     
     wlScanTitles()
@@ -3828,7 +3829,7 @@ function wl_OnUpdate(self, elapsed)
                 wlTimers[name] = false; -- Clear timer
 
                 if name == "autoCollect" then
-                    wlCollect();
+                    wlCollect(false);
                     
                 elseif name == "clearLootToastSource" then
                     wlLootToastSourceId = nil;

@@ -3330,6 +3330,7 @@ function wlCollect(userInitiated)
         return;
     end
 
+    DEFAULT_CHAT_FRAME:UnregisterEvent("TIME_PLAYED_MSG");
     wlQueryTimePlayed();
     
     wlScanAppearances()
