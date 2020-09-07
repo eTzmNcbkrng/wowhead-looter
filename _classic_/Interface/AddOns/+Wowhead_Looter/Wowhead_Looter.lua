@@ -2742,7 +2742,9 @@ function wlCollect(userInitiated)
         return;
     end
 
-    DEFAULT_CHAT_FRAME:UnregisterEvent("TIME_PLAYED_MSG");
+    for i = 1, 10 do 
+      _G["ChatFrame" .. i]:UnregisterEvent("TIME_PLAYED_MSG")
+    end
     wlQueryTimePlayed();
     
     wlScanTitles()
